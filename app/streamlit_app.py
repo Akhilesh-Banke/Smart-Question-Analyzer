@@ -1,120 +1,98 @@
-import streamlit as st
-import tempfile
 import os
 import sys
 
 # --- Fix import path for src modules ---
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-# --- Internal Imports ---
-from src.pdf_parser import pdf_to_images
-from src.ocr_engine import ocr_image
+import streamlit as st
+
+from src.pdf_parser import process_pdf
+from src.text_cleaner import normalize_question, get_frequent_questions
 from src.question_extractor import extract_questions_from_text
-from src.text_cleaner import normalize_question
 from src.rag_retriever import RAGRetriever
 from src.llm_interface import GeminiLLM
-from src.text_cleaner import get_frequent_questions
 
+# --- App Configuration ---
+st.set_page_config(page_title="Smart Question Analyzer", page_icon="🧠", layout="wide")
 
-# --- Page Setup ---
-st.set_page_config(
-    page_title="Smart Question Analyzer",
-    page_icon="🧠",
-    layout="wide"
-)
+# --- Initialize Session State ---
+if "retriever" not in st.session_state:
+    st.session_state.retriever = RAGRetriever(use_gemini=True)
+if "llm" not in st.session_state:
+    st.session_state.llm = GeminiLLM()
+if "questions" not in st.session_state:
+    st.session_state.questions = []
 
-st.title(" Smart Question Analyzer")
-st.markdown("Upload multiple question paper PDFs — extract, analyze, and query them using Gemini 1.5 Flash!")
+# --- Header ---
+st.title("🧠 Smart Question Analyzer")
+st.markdown("Upload your **question paper (PDF or scanned)** and get insights powered by AI.")
 
-# --- Sidebar Settings ---
-st.sidebar.header("⚙️ Settings")
-
-ocr_engine_choice = st.sidebar.selectbox(
-    "Choose OCR Engine",
-    ["pytesseract (default)"],
-    help="OCR engine for text extraction from images."
-)
-
-use_gemini_embed = st.sidebar.checkbox(
-    "Use Gemini Embeddings (faster, higher quality)",
-    value=True
-)
+# --- Sidebar Controls ---
+st.sidebar.header("⚙️ Configuration")
+use_gemini_embed = st.sidebar.checkbox("Use Gemini Embeddings (faster, higher quality)", value=True)
+st.sidebar.markdown("---")
 
 # --- File Upload ---
-uploaded_files = st.file_uploader(
-    "📂 Upload multiple question papers (PDFs)",
-    type=["pdf"],
-    accept_multiple_files=True
-)
+uploaded_pdf = st.file_uploader("📄 Upload a PDF", type=["pdf"])
+if not uploaded_pdf:
+    st.info("👉 Upload a PDF file to get started.")
+    st.stop()
 
-# --- Initialize Components ---
-llm = GeminiLLM()
-retriever = RAGRetriever(use_gemini=use_gemini_embed)
+# --- PDF Processing ---
+with st.spinner("📚 Processing PDF..."):
+    extracted_text = process_pdf(uploaded_pdf)
 
-# --- Temp folder setup ---
-temp_dir = tempfile.mkdtemp()
+if not extracted_text.strip():
+    st.warning("No readable text found. Try uploading a clearer or text-based PDF.")
+    st.stop()
 
-if uploaded_files:
-    all_questions = []
+# --- Question Extraction ---
+with st.spinner("🔍 Extracting questions..."):
+    raw_questions = extract_questions_from_text(extracted_text)
+    normalized_questions = [normalize_question(q) for q in raw_questions]
+    st.session_state.questions = normalized_questions
 
-    with st.spinner("📖 Extracting questions from uploaded PDFs..."):
-        for uploaded_file in uploaded_files:
-            temp_path = os.path.join(temp_dir, uploaded_file.name)
-            with open(temp_path, "wb") as f:
-                f.write(uploaded_file.getvalue())
+if not normalized_questions:
+    st.error("❌ No questions could be detected in this document.")
+    st.stop()
 
-            # Convert PDF pages to images
-            pages = pdf_to_images(temp_path)
-            st.write(f"📘 Processing **{uploaded_file.name}** — {len(pages)} pages")
+st.success(f"✅ Extracted {len(normalized_questions)} questions successfully!")
 
-            # OCR each page
-            for page_idx, img in enumerate(pages):
-                text = ocr_image(img, engine=ocr_engine_choice)
-                questions = extract_questions_from_text(text)
-                questions = [normalize_question(q) for q in questions]
-                all_questions.extend(questions)
+# --- Display Sample Questions ---
+st.subheader("📋 Extracted Questions (Preview)")
+for i, question in enumerate(normalized_questions[:10], start=1):
+    st.write(f"{i}. {question}")
 
-    # --- Display Frequent Questions ---
-    if all_questions:
-        frequent_qs = get_frequent_questions(all_questions, top_k=10)
-        st.markdown("### 🔁 Most Frequent Questions Across All PDFs")
-        for q, count in frequent_qs:
-            st.markdown(f"- **{q}** _(count: {count})_")
+# --- Frequent Question Insights ---
+freq_df = get_frequent_questions(normalized_questions, top_n=10)
+st.subheader("📊 Most Frequent or Similar Questions")
+st.dataframe(freq_df, use_container_width=True)
 
-        retriever.add_documents(all_questions)
-    else:
-        st.warning("No questions could be extracted. Try a different PDF or better scan quality.")
+# --- RAG Retriever Setup ---
+st.session_state.retriever.clear_memory()
+st.session_state.retriever.add_documents(normalized_questions)
 
-# --- Query Section ---
+# --- User Query Section ---
 st.markdown("---")
-st.subheader("💬 Ask Your Question")
+st.subheader("💬 Ask AI About the Questions")
 
-user_query = st.text_input("Type your question here...")
+user_query = st.text_input("Type your question or keyword (e.g., 'data structures' or 'explain question 3'):")
 
-if st.button("🔍 Get Answer"):
-    if not user_query.strip():
-        st.warning("Please enter a question first.")
+if user_query:
+    with st.spinner("🔎 Retrieving relevant context..."):
+        retrieved_docs = st.session_state.retriever.retrieve(user_query, top_k=3)
+
+    if not retrieved_docs:
+        st.warning("No relevant questions found for your query.")
     else:
-        with st.spinner("🔎 Searching for relevant questions..."):
-            retrieved_context = retriever.retrieve(user_query, top_k=3)
+        st.markdown("### 🔗 Retrieved Context")
+        for i, (txt, score) in enumerate(retrieved_docs, start=1):
+            st.write(f"**{i}.** {txt} _(score: {score:.2f})_")
 
-        if retrieved_context:
-            # Flatten retrieved context into readable text
-            context_text = "\n".join([q for q, _ in retrieved_context])
+        context_text = "\n".join([t for t, _ in retrieved_docs])
 
-            with st.spinner("🤖 Generating answer with Gemini..."):
-                answer = llm.chat_with_context(user_query, context_text)
+        with st.spinner("🤖 Generating answer with Gemini..."):
+            answer = st.session_state.llm.chat_with_context(user_query, context_text)
 
-            st.markdown("### 🧩 Answer")
-            st.write(answer)
-        else:
-            st.warning("No relevant questions found in the uploaded PDFs.")
-
-# --- Footer ---
-st.sidebar.markdown("---")
-st.sidebar.info(
-    "Built by **Project AC**\n\n"
-    "Uses Gemini 1.5 Flash for reasoning and embeddings.\n"
-    "Local fallback for offline embedding support."
-)
-
+        st.markdown("### 🧩 AI Answer")
+        st.write(answer)

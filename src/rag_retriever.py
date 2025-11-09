@@ -1,4 +1,3 @@
-
 """
 Retrieval module for fetching relevant questions or context
 using embeddings and similarity search (RAG: Retrieval Augmented Generation).
@@ -21,18 +20,28 @@ class RAGRetriever:
         self.stored_texts = []      # stores questions/text
         self.stored_embeddings = [] # stores corresponding embeddings
 
-    def add_documents(self, texts: list[str]):
+    def add_documents(self, texts: list[str], replace: bool = False):
         """
-        Add documents or questions to the retriever’s memory.
+        Add or replace documents/questions in the retriever’s memory.
+
+        Args:
+            texts (list[str]): List of strings (questions or docs)
+            replace (bool): If True, clear memory before adding new data.
         """
         if not texts:
+            print("[WARN] No documents provided to add.")
             return
+
+        if replace:
+            self.clear_memory()
 
         embeddings = self.embedder.encode(texts)
         embeddings = self.embedder.normalize(embeddings)
         self.stored_texts.extend(texts)
         self.stored_embeddings.extend(embeddings)
+
         print(f"[INFO] Added {len(texts)} new items to retriever memory.")
+        print(f"[INFO] Total stored documents: {len(self.stored_texts)}")
 
     def retrieve(self, query: str, top_k: int = 5) -> list[tuple[str, float]]:
         """
@@ -61,3 +70,7 @@ class RAGRetriever:
         self.stored_texts = []
         self.stored_embeddings = []
         print("[INFO] Retriever memory cleared.")
+
+    def memory_size(self) -> int:
+        """Returns number of stored documents."""
+        return len(self.stored_texts)
