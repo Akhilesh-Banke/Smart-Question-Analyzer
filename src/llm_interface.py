@@ -1,11 +1,11 @@
 """
-LLM Interface using Google Gemini 1.5 Flash (Free Tier) with local fallback.
+LLM Interface using Google Gemini 2.5 Flash (Free Tier)
+Enhanced for Markdown-formatted, code-friendly answers.
 """
 
 import google.generativeai as genai
+import re
 from src.config import GOOGLE_API_KEY, LLM_MODEL
-from sentence_transformers import SentenceTransformer, util
-import numpy as np
 
 # Configure Gemini API
 genai.configure(api_key=GOOGLE_API_KEY)
@@ -13,78 +13,74 @@ genai.configure(api_key=GOOGLE_API_KEY)
 
 class GeminiLLM:
     """
-    Handles all interactions with the Gemini LLM (primary) and local fallback (secondary).
+    Handles all interactions with the Gemini LLM.
     """
 
     def __init__(self, model_name: str = LLM_MODEL):
         self.model_name = model_name
         self.model = genai.GenerativeModel(model_name)
-        self.fallback_model = SentenceTransformer("all-MiniLM-L6-v2")
 
     def generate_answer(self, prompt: str) -> str:
         """
-        Generate an answer using Gemini.
+        Generate an answer using Gemini with clean Markdown formatting.
         """
         try:
             response = self.model.generate_content(prompt)
             if hasattr(response, "text") and response.text.strip():
-                return response.text
+                cleaned = self._format_markdown(response.text.strip())
+                return cleaned
             else:
-                raise ValueError("Empty Gemini response")
+                return "_⚠️ Sorry, I couldn’t generate a detailed answer this time._"
         except Exception as e:
-            print(f"[WARN] Gemini failed: {e}")
-            return None
-
-    def local_fallback_answer(self, question: str, context: str) -> str:
-        """
-        Fallback response using a local embedding model (zero cost).
-        It tries to find the most semantically relevant sentences in context.
-        """
-        if not context.strip():
-            return "No relevant context available to answer this question."
-
-        # Split context into sentences
-        sentences = [s.strip() for s in context.split("\n") if len(s.strip()) > 5]
-        if not sentences:
-            return "Context did not contain enough information."
-
-        # Encode question and sentences
-        q_emb = self.fallback_model.encode(question, convert_to_tensor=True)
-        s_emb = self.fallback_model.encode(sentences, convert_to_tensor=True)
-
-        # Compute cosine similarities
-        scores = util.pytorch_cos_sim(q_emb, s_emb)[0]
-        top_idx = int(np.argmax(scores))
-        best_sentence = sentences[top_idx]
-
-        return f"(Fallback Response)\nBased on available data, the most relevant information is:\n→ {best_sentence}"
+            return f"❌ **[Gemini Error]**: {e}"
 
     def chat_with_context(self, question: str, context: str) -> str:
         """
-        Uses RAG-like approach to answer based on context (retrieved questions).
-        Tries Gemini first, then falls back to local model.
+        Uses RAG-like approach to answer based on retrieved context.
         """
+        if not context.strip():
+            context = "No relevant context found."
+
         prompt = f"""
-        You are an academic assistant answering subject-related questions.
-        Use the context below to answer clearly and concisely.
-        ---
-        Context: {context}
-        ---
-        Question: {question}
-        Answer:
+You are an intelligent AI assistant specialized in answering technical and academic questions.
+Respond clearly and concisely in Markdown format.
+If the answer contains Python code, wrap it properly in ```python code fences.
+
+Context:
+{context}
+
+Question:
+{question}
+
+Now write a helpful and well-formatted answer:
+"""
+        answer = self.generate_answer(prompt)
+
+        if not answer or "Sorry" in answer:
+            return f"💡 (Fallback) Based on available data, I found this relevant: **{question.lower()}**"
+        return answer
+
+    def _format_markdown(self, text: str) -> str:
         """
-        gemini_answer = self.generate_answer(prompt)
-        if gemini_answer:
-            return gemini_answer
-        return self.local_fallback_answer(question, context)
+        Cleans Gemini's Markdown:
+        - Fixes code fences like ```**python**
+        - Removes redundant bold markers inside code
+        - Ensures consistent spacing and readable structure
+        """
+        # Fix bad code block syntax: ```**python** → ```python
+        text = re.sub(r"```[*_]*python[*_]*", "```python", text, flags=re.IGNORECASE)
 
+        # Remove accidental trailing code fences like ```**python**
+        text = re.sub(r"```[*_]*\s*$", "```", text, flags=re.MULTILINE)
 
-#  wrapper function (for Streamlit)
-_gemini_instance = GeminiLLM()
+        # Remove duplicated ```python``` occurrences
+        text = re.sub(r"(```python\s*){2,}", "```python\n", text)
 
-def ask_gemini(question: str, context: str = "") -> str:
-    """
-    Wrapper to ask Gemini model a question with optional context.
-    Falls back to local model if Gemini is unavailable.
-    """
-    return _gemini_instance.chat_with_context(question, context)
+        # Remove Markdown bold markup from keywords inside code
+        text = re.sub(r"\*\*(.*?)\*\*", r"\1", text)
+
+        # Compact excessive blank lines
+        text = re.sub(r"\n{3,}", "\n\n", text)
+
+        # Final trim
+        return text.strip()

@@ -3,14 +3,13 @@ Embedding engine for converting text into numerical vectors.
 Supports:
 - Google Gemini Embeddings (textembedding-gecko)
 - SentenceTransformer (local fallback)
-- Streamlit caching for speed
 """
 
 import google.generativeai as genai
 from sentence_transformers import SentenceTransformer
 import numpy as np
-import streamlit as st
 from src.config import GOOGLE_API_KEY
+import streamlit as st
 
 
 class EmbeddingEngine:
@@ -26,12 +25,11 @@ class EmbeddingEngine:
         self.model_name = model_name or "all-MiniLM-L6-v2"
         self.local_model = SentenceTransformer(self.model_name)
 
-        # Configure Gemini
+        # Configure Gemini API
         genai.configure(api_key=GOOGLE_API_KEY)
 
-    @st.cache_data(show_spinner=False)
     def get_gemini_embedding(self, text: str):
-        """Get Gemini embedding (textembedding-gecko model). Cached."""
+        """Get Gemini embedding (textembedding-gecko model)."""
         try:
             model = "models/textembedding-gecko"
             response = genai.embed_content(model=model, content=text)
@@ -39,11 +37,6 @@ class EmbeddingEngine:
         except Exception as e:
             print(f"[ERROR] Gemini embedding failed: {e}")
             return None
-
-    @st.cache_data(show_spinner=False)
-    def get_local_embedding(self, text: str):
-        """Compute local embedding using SentenceTransformer. Cached."""
-        return self.local_model.encode([text], show_progress_bar=False, convert_to_numpy=True)[0]
 
     def encode(self, texts, batch_size=16):
         """
@@ -55,14 +48,13 @@ class EmbeddingEngine:
 
         embeddings = []
         for text in texts:
+            emb = None
             if self.use_gemini:
                 emb = self.get_gemini_embedding(text)
-                if emb is not None:
-                    embeddings.append(emb)
-                    continue  # skip to next text
 
-            # fallback: local embedding
-            emb = self.get_local_embedding(text)
+            if emb is None:
+                emb = self.local_model.encode([text], show_progress_bar=False, convert_to_numpy=True)[0]
+
             embeddings.append(emb)
 
         return np.array(embeddings, dtype=np.float32)
@@ -71,3 +63,13 @@ class EmbeddingEngine:
         """Normalize embedding vectors (L2 normalization)."""
         norm = emb / (np.linalg.norm(emb, axis=1, keepdims=True) + 1e-10)
         return norm
+
+
+@st.cache_data(show_spinner=False)
+def get_embeddings_cached(texts, use_gemini=True):
+    """
+    Cached embedding computation to avoid recomputation.
+    """
+    engine = EmbeddingEngine(use_gemini=use_gemini)
+    embeddings = engine.encode(texts)
+    return embeddings
