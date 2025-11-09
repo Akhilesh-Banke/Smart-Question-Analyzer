@@ -1,0 +1,15 @@
+streamlit
+pymupdf
+pdf2image
+pillow
+pytesseract
+easyocr
+sentence-transformers
+faiss-cpu
+google-generativeai
+openai
+numpy
+pandas
+scikit-learn
+python-dotenv
+tqdm
