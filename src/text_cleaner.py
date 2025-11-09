@@ -1,12 +1,24 @@
+# src/text_cleaner.py
 import re
+from collections import Counter
 
+def normalize_question(text: str) -> str:
+    """
+    Normalize a question by removing punctuation, lowercasing, and trimming spaces.
+    """
+    text = text.strip().lower()
+    text = re.sub(r'\s+', ' ', text)
+    text = re.sub(r'[^\w\s?]', '', text)
+    return text.strip()
 
-def normalize_question(q):
-    if not q: return q
-    q = q.strip()
-    q = re.sub(r'\s+', ' ', q)
-    # remove leading numbering like '1.' or '(i)'
-    q = re.sub(r'^\(?\d+\)?[\.)\-:\s]+', '', q)
-    # remove page footers like 'Page 3 of 10'
-    q = re.sub(r'page\s*\d+(\s*of\s*\d+)?', '', q, flags=re.I)
-    return q
+def get_frequent_questions(questions: list[str], top_k: int = 10):
+    """
+    Given a list of question strings, return the most frequent ones.
+    Returns: list of (question, count)
+    """
+    if not questions:
+        return []
+
+    normalized = [normalize_question(q) for q in questions if q.strip()]
+    freq_counter = Counter(normalized)
+    return freq_counter.most_common(top_k)

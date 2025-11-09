@@ -1,37 +1,63 @@
+
+"""
+Retrieval module for fetching relevant questions or context
+using embeddings and similarity search (RAG: Retrieval Augmented Generation).
+"""
+
 import numpy as np
+from sklearn.metrics.pairwise import cosine_similarity
 from src.embedding_engine import EmbeddingEngine
 
+
 class RAGRetriever:
-    """
-    A simple retrieval module for the Question Analyzer system.
-    It embeds all extracted questions and retrieves top-k most similar
-    ones to a user query using cosine similarity.
-    """
+    def __init__(self, use_gemini: bool = True):
+        """
+        Initialize the retriever with an embedding engine.
 
-    def __init__(self, texts, embeddings=None):
-        self.texts = texts
-        self.emb_engine = EmbeddingEngine()
-        if embeddings is None:
-            self.embeddings = self.emb_engine.encode(texts)
-        else:
-            self.embeddings = embeddings
-        self.norm_embeddings = self.emb_engine.normalize(self.embeddings)
+        Args:
+            use_gemini (bool): Whether to use Gemini embeddings (default: True).
+        """
+        self.embedder = EmbeddingEngine(use_gemini=use_gemini)
+        self.stored_texts = []      # stores questions/text
+        self.stored_embeddings = [] # stores corresponding embeddings
 
-    def retrieve(self, query, k=5):
-        """Retrieve top-k most similar question texts for a given query."""
-        q_emb = self.emb_engine.encode(query)
-        q_norm = q_emb / (np.linalg.norm(q_emb, axis=1, keepdims=True) + 1e-10)
-        sims = (self.norm_embeddings @ q_norm.T).squeeze()
-        idx = np.argsort(-sims)[:k]
-        return [self.texts[i] for i in idx]
+    def add_documents(self, texts: list[str]):
+        """
+        Add documents or questions to the retriever’s memory.
+        """
+        if not texts:
+            return
 
-    def build_prompt(self, user_q, docs):
-        """Format a prompt for RAG-style LLM input."""
-        ctx = "\n\n---\n\n".join(docs)
-        prompt = (
-            "You are a helpful assistant. Use the following extracted content "
-            "from uploaded documents to answer the question. "
-            "If the context is insufficient, say you don't know.\n\n"
-            f"Context:\n{ctx}\n\nQuestion:\n{user_q}\n\nAnswer:"
-        )
-        return prompt
+        embeddings = self.embedder.encode(texts)
+        embeddings = self.embedder.normalize(embeddings)
+        self.stored_texts.extend(texts)
+        self.stored_embeddings.extend(embeddings)
+        print(f"[INFO] Added {len(texts)} new items to retriever memory.")
+
+    def retrieve(self, query: str, top_k: int = 5) -> list[tuple[str, float]]:
+        """
+        Retrieve top_k similar documents/questions for a given query.
+
+        Returns:
+            List of tuples: [(text, similarity_score), ...]
+        """
+        if not self.stored_embeddings:
+            print("[WARN] No stored documents to search.")
+            return []
+
+        query_emb = self.embedder.encode(query)
+        query_emb = self.embedder.normalize(query_emb)
+
+        similarities = cosine_similarity(query_emb, np.array(self.stored_embeddings))
+        similarities = similarities.flatten()
+
+        top_indices = similarities.argsort()[::-1][:top_k]
+        results = [(self.stored_texts[i], float(similarities[i])) for i in top_indices]
+
+        return results
+
+    def clear_memory(self):
+        """Clear stored texts and embeddings."""
+        self.stored_texts = []
+        self.stored_embeddings = []
+        print("[INFO] Retriever memory cleared.")

@@ -12,7 +12,7 @@ load_dotenv()
 # }
 
 # --- GEMINI CONFIG ---
-GOOGLE_API_KEY = os.getenv("AIzaSyDfgt9lYPvyVkGtHzOUrKqpWyKefvFt9PI")
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 
 # --- MODEL SETTINGS ---
 LLM_MODEL = "gemini-1.5-flash"
