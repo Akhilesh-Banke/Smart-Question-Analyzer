@@ -14,8 +14,8 @@ from src.llm_interface import GeminiLLM
 
 
 # --- Streamlit Config ---
-st.set_page_config(page_title="🧠 Smart Question Analyzer", layout="wide")
-st.title("🧠 Smart Question Analyzer")
+st.set_page_config(page_title="Smart Question Analyzer", layout="wide")
+st.title("Smart Question Analyzer")
 st.markdown("Analyze question papers, find frequent questions, and chat with LLM to get contextual answers.")
 
 
@@ -92,7 +92,7 @@ with tab1:
 # TAB 2: Chat Interface
 # =========================================================
 with tab2:
-    st.subheader("💬 Chat with LLM about your Questions")
+    st.subheader("Chat with LLM about your Questions")
     st.caption("Ask LLM any question or refer to an extracted question for contextual answers.")
 
     if not st.session_state.questions:
@@ -116,6 +116,6 @@ with tab2:
                 st.write(answer)
 
                 if context:
-                    st.markdown("### 🔍 Context Used")
+                    st.markdown("###  Context Used")
                     for i, (txt, score) in enumerate(context, start=1):
                         st.markdown(f"**{i}.** {txt} _(similarity: {score:.2f})_")
